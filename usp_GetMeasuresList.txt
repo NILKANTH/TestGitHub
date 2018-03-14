@@ -1,0 +1,98 @@
+USE [MasterOLAPControl]
+GO
+/****** Object:  StoredProcedure [dbo].[usp_GetMeasuresList]    Script Date: 3/9/2017 4:34:17 AM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- =============================================
+-- Author:		Nishit
+-- Create date: <Create Date,,>
+-- Description:	<Description,,>
+-- exec usp_GetMeasuresList 'pgfh50'
+-- =============================================
+ALTER Procedure [dbo].[usp_GetMeasuresList] @catcode varchar(100)
+as
+begin
+
+
+IF OBJECT_ID('tempdb..#Matercode') IS NOT NULL
+DROP TABLE #Matercode
+
+SELECT distinct category,MASTERCODE 
+into #Matercode
+FROM MT2SQL14.SITECONTROL.DBO.VWCUBECATEGORY A 
+JOIN MT2SQL14.SITECONTROL.DBO.MASTERFVCCTYPES B 
+ON ISNULL(A.FVCCTYPE,0)  = ISNULL(FVCCTYPESID,0)
+WHERE ISNULL(A.FVCCTYPE,0) <> 0 AND ISNULL(ISACTIVE,0) = 1 
+AND mastercode = 'acfv' and Clientserver <> 'MT2SQL13'
+and category = @catcode
+union 
+SELECT distinct category,MASTERCODE 
+FROM MT2SQL14.SITECONTROL.DBO.VWCUBECATEGORY A 
+JOIN MT2SQL14.SITECONTROL.DBO.MASTERFVCCTYPES B 
+ON ISNULL(A.FVCCTYPE,0)  = ISNULL(FVCCTYPESID,0)
+WHERE ISNULL(A.FVCCTYPE,0) <> 0 AND ISNULL(ISACTIVE,0) = 1 
+AND mastercode = 'cr' and category = @catcode 
+
+IF OBJECT_ID('tempdb..#M1') IS NOT NULL
+DROP TABLE #M1
+
+select V.Category+MeasureGroupName as MeasureGroupName, MeasureName, M.AggregationType as AggregateFunction,
+   Case when V.CodeType='C' and MT.Tablename='FactFlyerPage' Then V.FlyerTable+MT.TableName Else V.Category+MT.TableName end as SourceTable, 
+	MA.Attribute SourceColumn 
+	INTO #M1
+	from MDMeasures M JOIN MDMeasureGroup MG 
+  ON M.MeasureGroupID = MG.MeasureGroupID JOIN MDAttributes MA
+  ON MA.AttributeId = M.AttributeID JOIN MDTables MT 
+  ON MA.tableID= MT.TableID 
+  Cross JOIN Tbl_CateCodeNames V where V.Category=@catcode and MG.isactive=1  and M.isactive=1
+  AND ( (((V.CodeType = 'P' or V.CodeType = 'C') and MT.FVTable is not null ) OR ( MT.FVTable is null))
+		OR ((V.CodeType = 'F' and MT.FVTable in ('Flyer' ) ) OR (MT.FVTable is null)) )
+  Union
+SELECT        Category + MeasureGroupName as MeasureGroupName, M.MeasureName, M.AggregationType as AggregateFunction, 
+Case when V.CodeType='C' and MT.Tablename='FactFlyerPage' Then V.FlyerTable+MT.TableName Else V.Category+MT.TableName end as SourceTable,  MA.Attribute SourceColumn
+FROM            MDTables AS MT INNER JOIN
+                         MDCustomTable AS MCT ON MT.TableID = MCT.TableID INNER JOIN
+                         MDAttributes AS MA ON MT.TableID = MA.TableID JOIN
+						 MDMeasures M ON M.AttributeID = MA.AttributeId JOIN 
+						 Tbl_CateCodeNames V ON V.CategoryID= MCT.CategoryCodeID JOIN
+						 MDMeasureGroup MG ON MG.MeasureGroupID = M.MeasureGroupID
+WHERE        V.Category=@catcode
+Union
+SELECT        V.Category + MG.MeasureGroupName AS MeasureGroupName, M.MeasureName, M.AggregationType AS AggregateFunction, 
+Case when V.CodeType='C' and MT.Tablename='FactFlyerPage' Then V.FlyerTable+MT.TableName Else V.Category+MT.TableName end as SourceTable, MA.Attribute AS SourceColumn
+FROM            MDMeasureGroup AS MG INNER JOIN
+                         MDTables AS MT INNER JOIN
+                         MDAttributes AS MA ON MT.TableID = MA.TableID INNER JOIN
+                         MDMeasures AS M ON M.AttributeID = MA.AttributeId ON MG.MeasureGroupID = M.MeasureGroupID INNER JOIN
+                         Tbl_CateCodeNames AS V INNER JOIN
+                         MDCustomFactCols AS MCT ON V.CategoryID = MCT.CategoryCodeID ON MA.AttributeId = MCT.AttributeID
+WHERE       V.Category=@catcode AND ISMeasure = 1 and M.isActive=0
+
+
+
+DELETE A 
+--select replace(A.SourceTable,'acfv',''),a.*
+FROM #M1 A
+JOIN Tbl_CateCodeNames B ON replace(A.MeasureGroupName,'BridgePageEvent','') = B.Category
+JOIN #Matercode c ON replace(A.MeasureGroupName,'BridgePageEvent','') = c.Category
+WHERE B.ACFV = 1 AND replace(A.MeasureGroupName,@catcode,'') IN ('BridgePageEvent')
+and c.mastercode = 'ACFV'
+
+
+DELETE A 
+--select replace(A.SourceTable,'acfv',''),a.*
+FROM #M1 A
+JOIN Tbl_CateCodeNames B ON replace(A.MeasureGroupName,'BridgePageEvent','') = B.Category
+JOIN #Matercode c ON replace(A.MeasureGroupName,'BridgePageEvent','') = c.Category
+WHERE  replace(A.MeasureGroupName,@catcode,'') IN ('BridgePageEvent')
+and c.mastercode = 'CR'
+
+
+
+SELECT * FROM #M1
+
+
+End 
+
